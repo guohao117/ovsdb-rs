@@ -14,10 +14,10 @@ pub struct Schema {
 #[serde(rename_all(deserialize = "camelCase"))]
 pub struct Table {
     pub columns: HashMap<String, Column>,
-    pub max_rows: Option<u64>,
+    max_rows: Option<u64>,
     #[serde(default = "default_true")]
-    pub is_root: bool,
-    pub indexes: Option<Vec<Vec<String>>>,
+    is_root: bool,
+    indexes: Option<Vec<Vec<String>>>,
 }
 
 fn default_true() -> bool {
@@ -32,4 +32,22 @@ pub struct Column {
     pub ephemeral: bool,
     #[serde(default)]
     pub mutable: bool,
+}
+
+impl Table {
+    pub fn is_root(&self) -> bool {
+        self.is_root
+    }
+
+    pub fn iter_columns(&self) -> impl Iterator<Item = (&String, &Column)> {
+        self.columns.iter()
+    }
+
+    pub fn get_index_columns(&self) -> Option<&Vec<Vec<String>>> {
+        self.indexes.as_ref()
+    }
+
+    pub fn get_max_rows(&self) -> Option<u64> {
+        self.max_rows
+    }    
 }

@@ -323,6 +323,7 @@ mod tests {
             ConstrainedBaseType::BaseTypeReal { min_real, max_real, enum_ } => {
                 assert_eq!(min_real, Some(-1.5));
                 assert_eq!(max_real, Some(1.5));
+                assert_eq!(enum_, None);
             }
             _ => panic!("Expected BaseTypeReal"),
         }
