@@ -49,5 +49,5 @@ impl Table {
 
     pub fn get_max_rows(&self) -> Option<u64> {
         self.max_rows
-    }    
+    }
 }

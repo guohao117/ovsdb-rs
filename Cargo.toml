@@ -1,7 +1,8 @@
 [workspace]
 members = [
+    "crates/ovsdb-common",
     "crates/ovsdb-client",
     "crates/ovsdb-schema",
-    "apps/cli"
+    "apps/cli", "crates/ovsdb-codegen",
 ]
-resolver="2"
+resolver = "2"

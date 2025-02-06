@@ -1,68 +1,9 @@
+use ovsdb_common::common::{deserialize_set, serialize_set, AtomicType, Set};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use std::default::Default;
-// use std::collections::HashMap;
 
-const SET_HEADER: &str = "set";
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum Set<T> {
-    One(T),
-    Many(Vec<T>),
-}
-
-fn serialize_set<T, S>(set: &Option<Set<T>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    T: serde::Serialize,
-    S: serde::Serializer,
-{
-    match set {
-        Some(Set::One(value)) => value.serialize(serializer),
-        Some(Set::Many(values)) => {
-            let json_values: Vec<serde_json::Value> = values.iter()
-                .map(|v| serde_json::to_value(v).unwrap())
-                .collect();
-            serde_json::Value::Array(vec![
-                serde_json::Value::String(SET_HEADER.to_string()),
-                serde_json::Value::Array(json_values)
-            ]).serialize(serializer)
-        }
-        None => serde_json::Value::Null.serialize(serializer),
-    }
-}
-
-fn deserialize_set<'de, D, T>(deserializer: D) -> Result<Option<Set<T>>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
-    let value = serde_json::Value::deserialize(deserializer)?;
-    match value {
-        serde_json::Value::Null => Ok(None),
-        serde_json::Value::Array(arr) => {
-            // array must contain 2 elements, first is a string "set", second is an array T[]
-            if arr.len() != 2 {
-                return Err(de::Error::custom("expected array with 2 elements"));
-            }
-            let set_header = arr[0]
-                .as_str()
-                .ok_or_else(|| de::Error::custom("expected string"))?;
-            if set_header != SET_HEADER {
-                return Err(de::Error::custom("expected 'set'"));
-            }
-            let values: Vec<T> = serde_json::from_value(arr[1].clone())
-                .map_err(|e| de::Error::custom(e.to_string()))?;
-            Ok(Some(Set::Many(values)))
-        }
-        // single value, value must match the type T
-        _ => serde::Deserialize::deserialize(value)
-            .map(Set::One)
-            .map(Some)
-            .map_err(|e| de::Error::custom(e.to_string())),
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[serde(rename_all_fields(deserialize = "camelCase", serialize = "camelCase"))]
 pub enum ConstrainedBaseType {
@@ -105,7 +46,7 @@ pub enum ConstrainedBaseType {
     },
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum BaseType {
     Atomic(AtomicType),
@@ -116,7 +57,7 @@ fn ref_type_strong() -> RefType {
     RefType::Strong
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RefType {
     Strong,
@@ -137,7 +78,7 @@ where
         _ => Err(de::Error::custom("expected string")),
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum MaxOrUnlimited {
     Max(i64),
     Unlimited,
@@ -149,23 +90,23 @@ impl Default for MaxOrUnlimited {
     }
 }
 
-fn deserialize_max_or_unlimited<'de, D>(deserializer: D) -> Result<Option<MaxOrUnlimited>, D::Error>
+fn deserialize_max_or_unlimited<'de, D>(deserializer: D) -> Result<MaxOrUnlimited, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(deserializer)?;
     match value {
-        serde_json::Value::Null => Ok(None),
+        // serde_json::Value::Null => Ok(MaxOrUnlimited::default()),
         serde_json::Value::Number(n) => {
             if n.is_i64() {
-                Ok(Some(MaxOrUnlimited::Max(n.as_i64().unwrap())))
+                Ok(MaxOrUnlimited::Max(n.as_i64().unwrap()))
             } else {
                 Err(de::Error::custom("expected an i64 integer"))
             }
         }
         serde_json::Value::String(s) => {
             if s == "unlimited" {
-                Ok(Some(MaxOrUnlimited::Unlimited))
+                Ok(MaxOrUnlimited::Unlimited)
             } else {
                 Err(de::Error::custom("expected the string 'unlimited'"))
             }
@@ -181,24 +122,28 @@ pub enum ColumnType {
     Complex(ColumnComplexType),
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum AtomicType {
-    Integer,
-    String,
-    Real,
-    Boolean,
-    Uuid,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ColumnComplexType {
     pub key: BaseType,
     pub value: Option<BaseType>,
-    pub min: Option<i64>,
+
+    // min and max are optional, but default to 1 if not specified
+    // min is either 0 or 1, max must be at least 1 and greater than min
+    // max can also be "unlimited"
+    // If "min" and "max" are both 1 and "value" is not specified, the type is the scalar type specified by "key".
+    // If min and max are both 1 and "value" is specified, the type is a map from the scalar type specified by "key" to the scalar type specified by "value".
+    // If min is not 1 or max is not 1, or both, the type is a set of the scalar type specified by "key".
+    // If value is specified, the type is a map from key to value.
+    #[serde(default = "default_to_one")]
+    pub min: i64,
+
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_max_or_unlimited")]
-    pub max: Option<MaxOrUnlimited>,
+    pub max: MaxOrUnlimited,
+}
+
+fn default_to_one() -> i64 {
+    1
 }
 
 #[cfg(test)]
@@ -282,7 +227,11 @@ mod tests {
         let base_type = ConstrainedBaseType::BaseTypeString {
             min_length: Some(0),
             max_length: Some(100),
-            enum_: Some(Set::Many(vec!["tcp".to_string(), "udp".to_string(), "stcp".to_string()])),
+            enum_: Some(Set::Many(vec![
+                "tcp".to_string(),
+                "udp".to_string(),
+                "stcp".to_string(),
+            ])),
         };
         let json = serde_json::to_value(base_type).unwrap();
         assert_eq!(
@@ -320,7 +269,11 @@ mod tests {
         });
         let base_type: ConstrainedBaseType = serde_json::from_value(json).unwrap();
         match base_type {
-            ConstrainedBaseType::BaseTypeReal { min_real, max_real, enum_ } => {
+            ConstrainedBaseType::BaseTypeReal {
+                min_real,
+                max_real,
+                enum_,
+            } => {
                 assert_eq!(min_real, Some(-1.5));
                 assert_eq!(max_real, Some(1.5));
                 assert_eq!(enum_, None);
@@ -395,7 +348,7 @@ mod tests {
                 ref_type,
             } => {
                 assert_eq!(ref_table, "DNS");
-                assert_eq!(ref_type, RefType::Weak);
+                assert!(matches!(ref_type, RefType::Weak));
             }
             _ => panic!("Expected BaseTypeUUID"),
         }
@@ -414,7 +367,7 @@ mod tests {
                 ref_type,
             } => {
                 assert_eq!(ref_table, "TestTable");
-                assert_eq!(ref_type, RefType::Strong);
+                assert!(matches!(ref_type, RefType::Strong));
             }
             _ => panic!("Expected BaseTypeUUID"),
         }
@@ -427,28 +380,26 @@ mod tests {
                 "minInteger": 0,
                 "maxInteger": 4095
             },
-            "min": 0, 
+            "min": 0,
             "max": 1
         });
         let column_type: ColumnType = serde_json::from_value(json).unwrap();
         match column_type {
-            ColumnType::Complex(complex) => {
-                match complex.key {
-                    BaseType::Constrained(ConstrainedBaseType::BaseTypeInt {
-                        min_integer,
-                        max_integer,
-                        enum_,
-                    }) => {
-                        assert_eq!(min_integer, Some(0));
-                        assert_eq!(max_integer, Some(4095));
-                        assert_eq!(enum_, None);
-                    }
-                    _ => panic!("Expected BaseTypeInt"),
+            ColumnType::Complex(complex) => match complex.key {
+                BaseType::Constrained(ConstrainedBaseType::BaseTypeInt {
+                    min_integer,
+                    max_integer,
+                    enum_,
+                }) => {
+                    assert_eq!(min_integer, Some(0));
+                    assert_eq!(max_integer, Some(4095));
+                    assert_eq!(enum_, None);
+                    assert!(complex.value.is_none());
+                    assert_eq!(complex.min, 0);
+                    assert!(matches!(complex.max, MaxOrUnlimited::Max(1)));
                 }
-                assert_eq!(complex.value, None);
-                assert_eq!(complex.min, Some(0));
-                assert_eq!(complex.max, Some(MaxOrUnlimited::Max(1)));
-            }
+                _ => panic!("Expected BaseTypeInt"),
+            },
             _ => panic!("Expected ColumnComplexType"),
         }
     }
@@ -465,21 +416,19 @@ mod tests {
         });
         let column_type: ColumnType = serde_json::from_value(json).unwrap();
         match column_type {
-            ColumnType::Complex(complex) => {
-                match complex.key {
-                    BaseType::Constrained(ConstrainedBaseType::BaseTypeUUID {
-                        ref_table,
-                        ref_type,
-                    }) => {
-                        assert_eq!(ref_table, "DNS");
-                        assert_eq!(ref_type, RefType::Weak);
-                    }
-                    _ => panic!("Expected BaseTypeUUID"),
+            ColumnType::Complex(complex) => match complex.key {
+                BaseType::Constrained(ConstrainedBaseType::BaseTypeUUID {
+                    ref_table,
+                    ref_type,
+                }) => {
+                    assert_eq!(ref_table, "DNS");
+                    assert!(matches!(ref_type, RefType::Weak));
+                    assert!(complex.value.is_none());
+                    assert_eq!(complex.min, 0);
+                    assert!(matches!(complex.max, MaxOrUnlimited::Unlimited));
                 }
-                assert_eq!(complex.value, None);
-                assert_eq!(complex.min, Some(0));
-                assert_eq!(complex.max, Some(MaxOrUnlimited::Unlimited));
-            }
+                _ => panic!("Expected BaseTypeUUID"),
+            },
             _ => panic!("Expected ColumnComplexType"),
         }
     }
