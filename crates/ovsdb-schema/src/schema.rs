@@ -43,11 +43,38 @@ impl Table {
         self.columns.iter()
     }
 
-    pub fn get_index_columns(&self) -> Option<&Vec<Vec<String>>> {
+    pub fn index(&self) -> Option<&Vec<Vec<String>>> {
         self.indexes.as_ref()
     }
 
     pub fn get_max_rows(&self) -> Option<u64> {
         self.max_rows
+    }
+
+    pub fn has_index(&self) -> bool {
+        self.indexes.is_some()
+    }
+}
+
+impl Schema {
+    pub fn iter_tables(&self) -> impl Iterator<Item = (&String, &Table)> {
+        self.tables.iter()
+    }
+
+    pub fn get_table(&self, name: &str) -> Option<&Table> {
+        self.tables.get(name)
+    }
+
+
+    pub fn table_names(&self) -> Vec<String> {
+        self.tables.keys().cloned().collect()
+    }
+
+    pub fn table_count(&self) -> usize {
+        self.tables.len()
+    }
+
+    pub fn has_table(&self, name: &str) -> bool {
+        self.tables.contains_key(name)
     }
 }
